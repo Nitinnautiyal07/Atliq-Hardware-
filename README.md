@@ -1,254 +1,311 @@
-# Atliq-Hardware-
-Supply Chain Analytics of Atliq Hardware
+####
+Yearly Sales Report Generate a yearly report for Croma India where there are two columns
+# 1. Fiscal Year #2. Total Gross Sales amount In that year from Croma
 
-
-#--Month
-#--Product name
-#--Variant 
-#--Sold Quantity##
-#--Gross Price Per item
-#--Gross Price total
-
-select s.date,s.product_code,
-       p.product,p.variant,s.sold_quantity,
-       g.gross_price,g.fiscal_year,
-       Round((g.gross_price*s.sold_quantity),1) as gross_price_total
-from fact_sales_monthly s
-join dim_product p
-on p.product_code=s.product_code
+select get_fiscal_year(date) as fiscal_year,round(sum(g.gross_price* m.sold_quantity),1) as yearly_sales  from fact_sales_monthly m
 join fact_gross_price g
-on 
-   g.product_code=s.product_code and 
-   g.fiscal_year=get_fiscal_year(s.date)
-where 
-	  customer_code=90002002 and 
-	  get_fiscal_year(date)=2021 and
-      get_fiscal_quarter(date)="Q4"
-order by date asc
-
-// 
-
-#Month
-## total gross sales amount to coma india
-
-select s.date,
-       sum(g.gross_price*sold_quantity) as gross_price_total
- from fact_sales_monthly s
-join fact_gross_price g
-on g.product_code=s.product_code and 
-   g.fiscal_year=get_fiscal_year(s.date)
- where customer_code=90002002
- group by s.date
- order by s.date asc;
-
- //
-
- #Exercise: Yearly Sales Report
-#Generate a yearly report for Croma India where there are two columns
-#1. Fiscal Year
-#2. Total Gross Sales amount In that year from Croma
-
-select get_fiscal_year(date) as fiscal_year,
-       sum(round(s.sold_quantity*g.gross_price,2)) as yearly_sales
- from fact_sales_monthly s
-join fact_gross_price g
-on g.fiscal_year=get_fiscal_year(date) and
-   g.product_code=s.product_code
-       where customer_code=90002002
-       group by fiscal_year
-       order by fiscal_year;
+on g.fiscal_year=get_fiscal_year(m.date) and
+g.product_code=m.product_code
+join dim_customer c
+on m.customer_code=c.customer_code
+where m.customer_code=90002002 
+group by get_fiscal_year(date)
+order by fiscal_year
 
 
-       ///
-Problem Solving and pre_invoice deduction
+## creating view
 
+1)gross sales
+
+CREATE 
+    ALGORITHM = UNDEFINED 
+    DEFINER = `root`@`localhost` 
+    SQL SECURITY DEFINER
+VIEW `gross_sales` AS
+    SELECT 
+        `f`.`date` AS `date`,
+        `f`.`Fiscal_year` AS `fiscal_year`,
+        `f`.`customer_code` AS `customer_code`,
+        `q`.`customer` AS `customer`,
+        `q`.`market` AS `market`,
+        `f`.`product_code` AS `product_code`,
+        `n`.`product` AS `product`,
+        `n`.`variant` AS `variant`,
+        `f`.`sold_quantity` AS `sold_quantity`,
+        `m`.`gross_price` AS `gross_price_per_item`,
+        ROUND((`f`.`sold_quantity` * `m`.`gross_price`),
+                2) AS `gross_price_total`
+    FROM
+        (((`fact_sales_monthly` `f`
+        JOIN `fact_gross_price` `m` ON (((`f`.`product_code` = `m`.`product_code`)
+            AND (`f`.`Fiscal_year` = `m`.`fiscal_year`))))
+        JOIN `dim_product` `n` ON ((`f`.`product_code` = `n`.`product_code`)))
+        JOIN `dim_customer` `q` ON ((`f`.`customer_code` = `q`.`customer_code`)))
     
-   select *,(1 - pre_invoice_discount_pct) * gross_price_total  as net_invoice_sales,
-   (po.discounts_pct+po.other_deductions_pct) as post_invocie_discount_pct
-   from sales_preinv_discount s
-   join fact_post_invoice_deductions po
-   on 
-       s.date=po.date and
-       s.product_code=po.product_code and 
-	   s.customer_code=po.customer_code
-       
-///
+	
+2)Net sales
 
-Window function
+CREATE 
+    ALGORITHM = UNDEFINED 
+    DEFINER = `root`@`localhost` 
+    SQL SECURITY DEFINER
+VIEW `net_sales` AS
+    SELECT 
+        `sales_postinv_discount`.`date` AS `date`,
+        `sales_postinv_discount`.`fiscal_year` AS `fiscal_year`,
+        `sales_postinv_discount`.`customer_code` AS `customer_code`,
+        `sales_postinv_discount`.`market` AS `market`,
+        `sales_postinv_discount`.`product_code` AS `product_code`,
+        `sales_postinv_discount`.`product` AS `product`,
+        `sales_postinv_discount`.`variant` AS `variant`,
+        `sales_postinv_discount`.`sold_quantity` AS `sold_quantity`,
+        `sales_postinv_discount`.`gross_price_total` AS `gross_price_total`,
+        `sales_postinv_discount`.`pre_invoice_discount_pct` AS `pre_invoice_discount_pct`,
+        `sales_postinv_discount`.`net_invoice_sales` AS `net_invoice_sales`,
+        `sales_postinv_discount`.`post_invoice_discount_pct` AS `post_invoice_discount_pct`,
+        ((1 - `sales_postinv_discount`.`post_invoice_discount_pct`) * `sales_postinv_discount`.`net_invoice_sales`) AS `net_sales`
+    FROM
+        `sales_postinv_discount`
 
-SELECT * , 
-       amount*100/sum(amount) over() as pct 
-       FROM random_tables.expenses
-          order by category;
-          
-SELECT * , 
-       amount*100/sum(amount) over(partition by category ) as pct 
-       FROM random_tables.expenses
-          order by category;
-          
-          
-          
-SELECT * , 
-       sum(amount) over(partition by category order by date ) as total_expense_till_date 
-       FROM random_tables.expenses
-          order by category,date;
+3)Sales post invoice discount
+
+CREATE 
+    ALGORITHM = UNDEFINED 
+    DEFINER = `root`@`localhost` 
+    SQL SECURITY DEFINER
+VIEW `sales_postinv_discount` AS
+    SELECT 
+        `s`.`date` AS `date`,
+        `s`.`fiscal_year` AS `fiscal_year`,
+        `s`.`customer_code` AS `customer_code`,
+        `s`.`market` AS `market`,
+        `s`.`product_code` AS `product_code`,
+        `s`.`product` AS `product`,
+        `s`.`variant` AS `variant`,
+        `s`.`sold_quantity` AS `sold_quantity`,
+        `s`.`gross_price_total` AS `gross_price_total`,
+        `s`.`pre_invoice_discount_pct` AS `pre_invoice_discount_pct`,
+        (`s`.`gross_price_total` - (`s`.`pre_invoice_discount_pct` * `s`.`gross_price_total`)) AS `net_invoice_sales`,
+        (`po`.`discounts_pct` + `po`.`other_deductions_pct`) AS `post_invoice_discount_pct`
+    FROM
+        (`sales_preinv_discount` `s`
+        JOIN `fact_post_invoice_deductions` `po` ON (((`po`.`customer_code` = `s`.`customer_code`)
+            AND (`po`.`product_code` = `s`.`product_code`)
+            AND (`po`.`date` = `s`.`date`))))
+
+4)Sales pre invoice discount
+
+CREATE 
+    ALGORITHM = UNDEFINED 
+    DEFINER = `root`@`localhost` 
+    SQL SECURITY DEFINER
+VIEW `sales_preinv_discount` AS
+    SELECT 
+        `s`.`date` AS `date`,
+        `s`.`Fiscal_year` AS `fiscal_year`,
+        `s`.`customer_code` AS `customer_code`,
+        `c`.`market` AS `market`,
+        `p`.`product` AS `product`,
+        `p`.`product_code` AS `product_code`,
+        `p`.`variant` AS `variant`,
+        `s`.`sold_quantity` AS `sold_quantity`,
+        `g`.`gross_price` AS `gross_pirce_per_item`,
+        ROUND((`s`.`sold_quantity` * `g`.`gross_price`),
+                2) AS `gross_price_total`,
+        `pre`.`pre_invoice_discount_pct` AS `pre_invoice_discount_pct`
+    FROM
+        ((((`fact_sales_monthly` `s`
+        JOIN `dim_customer` `c` ON ((`s`.`customer_code` = `c`.`customer_code`)))
+        JOIN `dim_product` `p` ON ((`s`.`product_code` = `p`.`product_code`)))
+        JOIN `fact_gross_price` `g` ON (((`g`.`fiscal_year` = `s`.`Fiscal_year`)
+            AND (`g`.`product_code` = `s`.`product_code`))))
+        JOIN `fact_pre_invoice_deductions` `pre` ON (((`pre`.`customer_code` = `s`.`customer_code`)
+            AND (`pre`.`fiscal_year` = `s`.`Fiscal_year`))))
 
 
-          with cte1 as(
-SELECT customer,Round(sum(net_sales)/1000000,2) as net_sales_mln
-         FROM gdb041.net_sales n
-         join dim_customer c
-         on n.customer_code=c.customer_code
-         where fiscal_year=2021 
-         group by c.customer
-         )
-         select *,net_sales_mln*100/sum(net_sales_mln) over() as pct  from cte1
-         order by net_sales_mln desc
+### STored proceudre
 
-with cte1 as (
-          SELECT c.customer,c.region
-                ,Round(sum(net_sales)/1000000,2) as net_sales_mln
-         FROM gdb041.net_sales n
-         join dim_customer c
-         on n.customer_code=c.customer_code
-         where fiscal_year=2021 
-         group by c.customer,c.region )
-         select *,net_sales_mln*100/sum(net_sales_mln) over(partition by region) as pct_share_regions from cte1
-         order by region,net_sales_mln desc
+1)to get market bage on the basis of sales
 
-////
-
-Row and dense rank
-        
-         with cte1 as(
-SELECT *,row_number() over(partition by category order by amount desc ) as rn,
-         rank() over(partition by category order by amount desc ) as rnk,
-		 dense_rank() over(partition by category order by amount desc ) as drnk FROM random_tables.expenses
-order by category
+CREATE DEFINER=`root`@`localhost` PROCEDURE `get_market_badge`(
+IN in_market varchar(25),
+IN in_fiscal_year year,
+OUT out_badge varchar(15)
 )
-select * from cte1 where drnk<=2
+BEGIN
+	  declare qty int default 0;
+      
+      ## setting default market as India
+      
+      if in_market="" then
+         set in_market="India";
+	  end if;
+
+#retrieve total qty for given market and fyear
+      select sum(sold_quantity) into qty from fact_sales_monthly s
+      join dim_customer c
+      on s.customer_code=c.customer_code
+      where get_fiscal_year(s.date)=in_fiscal_year and c.market=in_market
+	  group by c.market;
+      
+      #determine market badge
+      
+      if qty>5000000 then
+         set out_badge="Gold";
+      else 
+         set out_badge="Silver";
+	  end if;
+END
+
+2)Monthly gross sales for customers
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `get_monthly_gross_sales_for_customer`(
+ in_customer_code text
+)
+BEGIN
+  select get_fiscal_year(date) as fiscal_year,round(sum(g.gross_price* m.sold_quantity),1) as yearly_sales  from fact_sales_monthly m
+join fact_gross_price g
+on g.fiscal_year=get_fiscal_year(m.date) and
+g.product_code=m.product_code
+join dim_customer c
+on m.customer_code=c.customer_code
+where find_in_set(s.customer_code,in_customer_code)>0
+group by get_fiscal_year(date);
+END
 
 
-SELECT *,
-         row_number() over(order by marks desc) as rn,
-		 rank()       over(order by marks desc) as rnk,
-         dense_rank() over(order by marks desc) as drnk FROM random_tables.student_marks;
+3)getting top customers by net sales
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `get_top_n_customer_by_net_sales`(
+	in_market varchar(30),
+	in_fiscal_year int,
+	in_top_n   int
+)
+BEGIN 
+    SELECT c.customer,Round(sum(s.net_sales)/1000000,2) as net_sales_mln FROM gdb0041.net_sales s
+    join dim_customer c
+    on c.customer_code=s.customer_code
+    where s.fiscal_year=in_fiscal_year and
+	      s.market=in_market
+    group by c.customer 
+    order by net_sales_mln desc
+    limit in_top_n;
+END
+
+4)getting top market by net sales
 
 
-         with cte1 as(
-	   SELECT p.division,
-       p.product,
-       sum(sold_quantity)  as total_quantity 
-       FROM fact_sales_monthly s
-       join dim_product p
-            on p.product_code=s.product_code
-		where fiscal_year=2021
-        group by p.product
-        ),
-   cte2 as( 
-        select *,
-        dense_rank () over(partition by division order by total_quantity desc) as drnk  from cte1
-        )
-select * from cte2 where drnk<=3;
+CREATE DEFINER=`root`@`localhost` PROCEDURE `get_top_n_markets_by_net_sales`(
+    in_fiscal_year int,
+    in_top_n int
+)
+BEGIN 
+SELECT market,Round(sum(net_sales)/1000000,2) as net_sales FROM gdb0041.net_sales
+where fiscal_year=in_fiscal_year
+group by market 
+order by net_sales_mln desc
+limit in_top_n;
+END
 
-with cte1 as (
-       select c.market,
-	   c.region,
-       round(sum(gross_price_total)/1000000,2) as gross_sales_mln
-		from  gross_sales s
-        join dim_customer c
-	     on c.customer_code=s.customer_code
-         where fiscal_year=2021
-         group by market
-         order by gross_sales_mln desc
+5)getting top products by net salles
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `get_top_n_prodducts_by_net_sales`(
+           in_fiscal_year int,
+           in_top_n int
+)
+BEGIN
+SELECT product,round(sum(net_sales)/1000000,2) as net_sales_mln FROM net_sales 
+where fiscal_year=in_fiscal_year
+group by product
+order by net_sales_mln desc
+limit in_top_n;
+END
+
+
+### Function creation for :
+
+1)to get fiscal wuarter from from fiscal year
+
+CREATE DEFINER=`root`@`localhost` FUNCTION `get_fiscal_quarter`(
+calendar_date date
+) RETURNS char(2) CHARSET utf8mb4
+    DETERMINISTIC
+BEGIN
+     declare m tinyint;
+     declare qtr char(2);
+	 set m=month(calendar_date) ;
+	 CASE
+         when m in(9,10,11) then
+				set qtr=("Q1");
+		 when m in(12,1,2) then
+				set qtr=("Q2");
+		 when m in(3,4,5) then
+				set qtr=("Q3");
+		 else
+				set qtr=("Q4");
+     END CASE;
+	
+RETURN qtr;
+END
+
+2)to get fiscal year from date
+
+CREATE DEFINER=`root`@`localhost` FUNCTION `get_fiscal_year`(
+calendar_date date
+) RETURNS int
+    DETERMINISTIC
+BEGIN
+	 declare fiscal_year int;
+	 SET  fiscal_year=YEAR(DATE_ADD(calendar_date, INTERVAL 4 month));
+     RETURN fiscal_year;
+END
+
+
+##Window function 
+
+
+with cte1 as  (
+SELECT c.customer,Round(sum(s.net_sales)/1000000,2) as net_sales_mln
+ FROM gdb0041.net_sales s
+join dim_customer c
+on c.customer_code=s.customer_code
+where s.fiscal_year=2021
+group by c.customer 
+)
+select *,net_sales_mln*100/sum(net_sales_mln) over() as pct
+from cte1
+order by net_sales_mln desc
+
+
+
+##widow functio excersise market share of customer by region
+
+
+with cte1 as  (
+SELECT c.customer,c.region,Round(sum(s.net_sales)/1000000,2) as net_sales_mln
+ FROM gdb0041.net_sales s
+join dim_customer c
+on c.customer_code=s.customer_code
+where s.fiscal_year=2021
+group by c.customer,c.region
+)
+select *,round(net_sales_mln*100/sum(net_sales_mln) over(partition by region),2) as pct
+from cte1
+order by net_sales_mln desc
+
+
+
+##Ranking region by gross sales using dense rank
+
+with cte1 as(
+SELECT c.customer_code,s.market,Round(sum(gross_price_total)/1000000,2) as gross_sales_mln FROM gross_sales s
+join dim_customer c
+on c.customer_code=s.customer_code
+where fiscal_year=2021
+group by s.market
+order by gross_sales_mln desc
 ),
 cte2 as (
-         select *,
-       dense_rank() over(partition by region order by gross_sales_mln desc) as drnk from cte1 
+select *,dense_rank() over(partition by region order by gross_sales_mln desc ) as drnk  from cte1
 )
-select * from cte2 where  drnk<=2
-
-    ///
-
-    Creating helper table
-
-    create table fact_act_est
-(
-select
-         s.date as date,
-         s.fiscal_year as fiscal_year,
-         s.product_code as product_code,
-         s.customer_code as customer_code,
-         s.sold_quantity as sold_quantity,
-         f.forecast_quantity as forecast_quantity
-from fact_sales_monthly s
-left join fact_forecast_monthly f
-using(date,customer_code,product_code)
-
-Union
-
-select
-         f.date as date,
-         f.fiscal_year as fiscal_year,
-         f.product_code as product_code,
-         f.customer_code as customer_code,
-         s.sold_quantity as sold_quantity,
-         f.forecast_quantity as forecast_quantity
-from fact_forecast_monthly f
-left join fact_sales_monthly s
-using(date,customer_code,product_code)
-);
-
-create temporary table table_2021
-with forecast_err_table as 
-       (SELECT s.customer_code as customer_code,
-       c.customer as customer_name,
-       c.market as market,
-       sum((s.forecast_quantity-s.sold_quantity)) as net_err,
-      sum( (s.forecast_quantity-s.sold_quantity))*100/sum(s.forecast_quantity) as net_err_pct,
-       sum(abs(s.forecast_quantity-s.sold_quantity)) as abs_err,
-       sum(abs(s.forecast_quantity-s.sold_quantity))*100/sum(s.forecast_quantity) as abs_err_pct
-       FROM gdb041.fact_act_est s
-       join dim_customer  c
-       on s.customer_code=c.customer_code
-       where s.fiscal_year=2021
-       group by customer_code
-)
-       
-select *,
-	   if (abs_err_pct > 100,0,100-abs_err_pct) as forecast_accuracy 
-       from forecast_err_table 
-		order by forecast_accuracy  desc;
-       
-## table for 2022
-
-create temporary table table_2020
-with forecast_err_table as 
-       (SELECT s.customer_code as customer_code,
-       c.customer as customer_name,
-       c.market as market,
-       sum((s.forecast_quantity-s.sold_quantity)) as net_err,
-      sum( (s.forecast_quantity-s.sold_quantity))*100/sum(s.forecast_quantity) as net_err_pct,
-       sum(abs(s.forecast_quantity-s.sold_quantity)) as abs_err,
-       sum(abs(s.forecast_quantity-s.sold_quantity))*100/sum(s.forecast_quantity) as abs_err_pct
-       FROM gdb041.fact_act_est s
-          join dim_customer  c
-       on s.customer_code=c.customer_code
-       where s.fiscal_year=2020
-       group by customer_code
-)
-       
-select *,
-	   if (abs_err_pct > 100,0,100-abs_err_pct) as forecast_accuracy 
-       from forecast_err_table     
-       order by forecast_accuracy  desc;
-
-select f2.customer_code,f1.customer_name,f2.market,f2.forecast_accuracy as forecast_accuracy_2020,
-       f1.forecast_accuracy as forecast_accuracy_2021
-       from  table_2021 as f1
-       join  table_2020 as f2
-       on f1.customer_code=f2.customer_code
-       where f1.forecast_accuracy < f2.forecast_accuracy
-       order by f2.forecast_accuracy;
-
-       
+select * from cte2 where drnk<=2
